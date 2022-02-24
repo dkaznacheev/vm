@@ -423,86 +423,99 @@ char* concat(char* buf, value* values, int size) {
 }
 
 char* convert_to_string(value v) {
-    if (v.type == type_int) {
-        long long* n = v.content;
-        int length = snprintf(NULL, 0,"%lld", *n);
-        char* buf = malloc((length + 1) * sizeof(char));
-        sprintf(buf, "%lld", *n);
-        return buf;
-    }
-    if (v.type == type_string) {
-        int l = strlen(v.content);
-        char* buf = malloc( (l + 4) * sizeof(char));
-        buf[0] = '"';
-        strcpy(buf + 1, v.content);
-        buf[l + 1] = '"';
-        buf[l + 2] = '\0';
-        return buf;
-    }
-    if (v.type == type_array) {
-        array* arr = v.content;
-        char* buf = malloc(4 * sizeof(char));
-        buf[0] = '[';
-        buf[1] = '\0';
-        int total_len = 4;
-        buf = concat(buf, arr->values, arr->value_num);
-        strcat(buf, "]");
-        return buf;
-    }
-    if (v.type == type_sexp) {
-        sexp* sx = v.content;
-
-        if (!strcmp(sx->name, "cons")) {
+    switch (v.type) {
+        case type_int: {
+            long long* n = v.content;
+            int length = snprintf(NULL, 0,"%lld", *n);
+            char* buf = malloc((length + 1) * sizeof(char));
+            sprintf(buf, "%lld", *n);
+            return buf;
+        }
+        case type_string: {
+            int l = strlen(v.content);
+            char* buf = malloc( (l + 4) * sizeof(char));
+            buf[0] = '"';
+            strcpy(buf + 1, v.content);
+            buf[l + 1] = '"';
+            buf[l + 2] = '\0';
+            return buf;
+        }
+        case type_array: {
+            array* arr = v.content;
             char* buf = malloc(4 * sizeof(char));
-            buf[0] = '{';
+            buf[0] = '[';
             buf[1] = '\0';
             int total_len = 4;
-            sexp* sxv = sx;
-            while (1) {
-                if (sxv->arity != 2) break;
+            buf = concat(buf, arr->values, arr->value_num);
+            strcat(buf, "]");
+            return buf;
+        }
+        case type_sexp: {
+            sexp* sx = v.content;
 
-                char* value_str = convert_to_string(sxv->values[0]);
-                int length = strlen(value_str);
-                total_len += length + 2;
-                buf = realloc(buf, total_len * sizeof(char));
-                strcat(buf, value_str);
+            if (!strcmp(sx->name, "cons")) {
+                char* buf = malloc(4 * sizeof(char));
+                buf[0] = '{';
+                buf[1] = '\0';
+                int total_len = 4;
+                sexp* sxv = sx;
+                while (1) {
+                    if (sxv->arity != 2) break;
 
-                value next = sxv->values[1];
-                if (next.type == type_int && *((long long*)next.content) == 0) {
-                    break;
+                    char* value_str = convert_to_string(sxv->values[0]);
+                    int length = strlen(value_str);
+                    total_len += length + 2;
+                    buf = realloc(buf, total_len * sizeof(char));
+                    strcat(buf, value_str);
+
+                    value next = sxv->values[1];
+                    if (next.type == type_int && *((long long*)next.content) == 0) {
+                        break;
+                    }
+                    if (next.type != type_sexp) break;
+                    sexp* sxn = next.content;
+                    if (strcmp(sxn->name, "cons")) break;
+                    strcat(buf, ", ");
+                    sxv = sxn;
                 }
-                if (next.type != type_sexp) break;
-                sexp* sxn = next.content;
-                if (strcmp(sxn->name, "cons")) break;
-                strcat(buf, ", ");
-                sxv = sxn;
+                strcat(buf, "}");
+                return buf;
+            } else {
+                char* buf = malloc(strlen(sx->name + 3) * sizeof(char));
+                strcpy(buf, sx->name);
+                if (sx->arity == 0) return buf;
+                strcat(buf, "(");
+                buf = concat(buf, sx->values, sx->arity);
+                strcat(buf, ")");
+                return buf;
             }
-            strcat(buf, "}");
-            return buf;
-        } else {
-            char* buf = malloc(strlen(sx->name + 3) * sizeof(char));
-            strcpy(buf, sx->name);
-            if (sx->arity == 0) return buf;
-            strcat(buf, "(");
-            buf = concat(buf, sx->values, sx->arity);
-            strcat(buf, ")");
-            return buf;
         }
     }
 
     return NULL;
 }
 
+
+
+enum builtin_opcodes {
+    builtin_read = 0,
+    builtin_write = 1,
+    builtin_length = 2,
+    builtin_string = 3,
+    builtin_array = 4,
+    builtin_elem = 5,
+};
+
 void run_builtin(state* st, int opcode, int arg) {
     switch (opcode) {
-        case 0: {// READ
+        case builtin_read: {// READ
             int read_value;
              fprintf(stdout, "> ");
             fscanf(stdin, "%d", &read_value);
             st_push(st, int_value_of(read_value));
             break;
         }
-        case 1: { // WRITE
+        case builtin_write: { // WRITE
             value top = st_pop(st);
             if (top.type == type_int) {
                   fprintf(stdout, "%lld\n", *((long long*)top.content));
@@ -510,7 +523,7 @@ void run_builtin(state* st, int opcode, int arg) {
             st_push(st, empty_value());
         }
             break;
-        case 2: {// LENGTH
+        case builtin_length: {// LENGTH
             value container = st_pop(st);
             switch (container.type) {
                 case type_sexp: {
@@ -533,13 +546,13 @@ void run_builtin(state* st, int opcode, int arg) {
             }
         }
             break;
-        case 3: { // STRING
+        case builtin_string: { // STRING
             value v = st_pop(st);
             char* str = convert_to_string(v);
             st_push(st, string_value(str));
         }
             break;
-        case 4: { // ARRAY
+        case builtin_array: { // ARRAY
             array* arr = malloc(sizeof(array));
             arr->value_num = arg;
             arr->values = malloc(sizeof(value) * arg);
@@ -549,19 +562,27 @@ void run_builtin(state* st, int opcode, int arg) {
             st_push(st, array_value(arr));
         }
             break;
-        case 5: { // ELEM?
+        case builtin_elem: { // ELEM?
             elem(st);
         }
             break;
     }
 }
 
+enum pattern_codes {
+    pattern_strcmp = 0,
+    pattern_string = 1,
+    pattern_array = 2,
+    pattern_sexp = 3,
+    pattern_ref = 4,
+    pattern_value = 5,
+    pattern_closure = 6,
+};
 void pattern(state* st, int pat_code) {
-    char *pats[] = {"=str", "#string", "#array", "#sexp", "#ref", "#val", "#fun"};
     value x = st_pop(st);
     int res = 0;
     switch (pat_code) {
-        case 0: {
+        case pattern_strcmp: {
             value y = st_pop(st);
             if (x.type != type_string || y.type != type_string) {
                 res = 0;
@@ -574,27 +595,27 @@ void pattern(state* st, int pat_code) {
             }
             break;
         }
-        case 1: {
+        case pattern_string: {
             res = x.type == type_string;
             break;
         }
-        case 2: {
+        case pattern_array: {
             res = x.type == type_array;
             break;
         }
-        case 3: {
+        case pattern_sexp: {
             res = x.type == type_sexp;
             break;
         }
-        case 4: {
+        case pattern_ref: {
             res = x.type != type_int;
             break;
         }
-        case 5: {
+        case pattern_value: {
             res = x.type == type_int;
             break;
         }
-        case 6: {
+        case pattern_closure: {
             res = x.type == type_closure;
             break;
         }
@@ -602,6 +623,46 @@ void pattern(state* st, int pat_code) {
     st_push(st, int_value_of(res));
 }
 
+enum high_opcode {
+    high_stop = 15,
+    high_binop = 0,
+    high_ops_1 = 1,
+    high_ld = 2,
+    high_lda = 3,
+    high_st = 4,
+    high_ops_2 = 5,
+    high_patterns = 6,
+    high_builtin = 7
+};
+
+enum low_ops1 {
+    low_ops1_const = 0,
+    low_ops1_string = 1,
+    low_ops1_sexp = 2,
+    low_ops1_sti = 3,
+    low_ops1_sta = 4,
+    low_ops1_jmp = 5,
+    low_ops1_end = 6,
+    low_ops1_ret = 7,
+    low_ops1_drop = 8,
+    low_ops1_dup = 9,
+    low_ops1_swap = 10,
+    low_ops1_elem = 11
+};
+
+enum low_ops2 {
+    low_ops2_cjmpz = 0,
+    low_ops2_cjmpnz = 1,
+    low_ops2_begin = 2,
+    low_ops2_cbegin = 3,
+    low_ops2_closure = 4,
+    low_ops2_callc = 5,
+    low_ops2_call = 6,
+    low_ops2_tag = 7,
+    low_ops2_array = 8,
+    low_ops2_fail = 9,
+    low_ops2_line = 10,
+};
 
 void interpret (FILE *f, bytefile *bf) {
 
@@ -636,11 +697,11 @@ void interpret (FILE *f, bytefile *bf) {
         // fprintf (f, "0x%.8x:\t%x%x\t", ip-bf->code_ptr-1, h, l);
 
         switch (h) {
-            case 15:
+            case high_stop:
                 goto stop;
 
                 /* BINOP */
-            case 0: {
+            case high_binop: {
                 // fprintf(f, "BINOP\t%s", ops[l - 1]);
                 value y = st_pop(&st);
                 value x = st_pop(&st);
@@ -661,16 +722,16 @@ void interpret (FILE *f, bytefile *bf) {
             }
                 break;
 
-            case 1:
+            case high_ops_1:
                 switch (l) {
-                    case  0: {
+                    case low_ops1_const: {
                         int v = INT;
                         // fprintf(f, "CONST\t%d", v);
                         st_push(&st, int_value_of(v));
                     }
                         break;
 
-                    case  1: {
+                    case  low_ops1_string: {
                         char *s = STRING;
                         // fprintf(f, "STRING\t%s", s);
                         char *copy = malloc(sizeof(char) * strlen(s));
@@ -679,7 +740,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  2: {
+                    case low_ops1_sexp: {
                         char *name = STRING;
                         int n = INT;
                         // fprintf(f, "SEXP\t%s ", name);
@@ -694,7 +755,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  3: {
+                    case low_ops1_sti: {
                         // fprintf(f, "STI");
                         value v = st.stack[st.sp - 1];
                         value d = st.stack[st.sp - 2];
@@ -704,7 +765,7 @@ void interpret (FILE *f, bytefile *bf) {
                         st.sp--;
                     }
                         break;
-                    case  4: {
+                    case low_ops1_sta: {
                         value v = st_pop(&st);
                         // fprintf(f, "STA");
                         value j = st_pop(&st);
@@ -721,14 +782,14 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  5: {
+                    case  low_ops1_jmp: {
                         int new_ip = INT;
                         // fprintf(f, "JMP\t0x%.8x", new_ip);
                         JUMPTO(new_ip);
                     }
                         break;
 
-                    case  6: {
+                    case low_ops1_end: {
                         // fprintf(f, "END");
                         if (st.csp == 0) {
                             goto stop;
@@ -739,7 +800,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  7: {
+                    case low_ops1_ret: {
                         // fprintf(f, "RET");
                         if (st.csp == 0) {
                             goto stop;
@@ -750,27 +811,27 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  8: {
+                    case low_ops1_drop: {
                         // fprintf(f, "DROP");
                         st.sp--;
                     }
                         break;
 
-                    case  9: {
+                    case low_ops1_dup: {
                         // fprintf(f, "DUP");
                         st.stack[st.sp] = st.stack[st.sp - 1];
                         st.sp++;
                     }
                         break;
 
-                    case 10: {
+                    case low_ops1_swap: {
                         // fprintf(f, "SWAP");
                         value t = st.stack[st.sp - 1];
                         st.stack[st.sp - 1] = st.stack[st.sp - 2];
                         st.stack[st.sp - 2] = t;
                     }
                         break;
-                    case 11: {
+                    case low_ops1_elem: {
                         // fprintf(f, "ELEM");
                         elem(&st);
                     }
@@ -779,9 +840,9 @@ void interpret (FILE *f, bytefile *bf) {
                 }
                 break;
 
-            case 2:
-            case 3:
-            case 4: {
+            case high_ld:
+            case high_lda:
+            case high_st: {
                 // fprintf(f, "%s\t", lds[h - 2]);
                 int dsgn_num = INT;
                 designation d;
@@ -804,45 +865,45 @@ void interpret (FILE *f, bytefile *bf) {
                         FAIL;
                 }
 
-                switch (h - 2) {
-                    case 0: // LD
+                switch (h) {
+                    case high_ld: // LD
                         st_push(&st, st_get_value(&st, d));
                         break;
-                    case 1: {// LDA
+                    case high_lda: {// LDA
                         designation* d = malloc(sizeof(designation));
                         d->type = l;
                         d->pos = dsgn_num;
                         st.stack[st.sp++] = ref_value(d);
                     }
                         break;
-                    case 2: //ST
+                    case high_st: //ST
                         st_update(&st, l, dsgn_num, st_top(&st));
                         break;
                 }
             }
                 break;
 
-            case 5:
+            case high_ops_2:
                 switch (l) {
-                    case  0: {
+                    case low_ops2_cjmpz: {
                         int new_ip = INT;
                         // fprintf(f, "CJMPz\t%0x.8x", new_ip);
-                        if (to_int(st.stack[--st.sp]) == 0) { // TODO checks
+                        if (to_int(st.stack[--st.sp]) == 0) { 
                             JUMPTO(new_ip);
                         }
                     }
                         break;
 
-                    case  1: {
+                    case low_ops2_cjmpnz: {
                         int new_ip = INT;
                         // fprintf(f, "CJMPnz\t%0x.8x", new_ip);
-                        if (to_int(st.stack[--st.sp]) != 0) { // TODO checks
+                        if (to_int(st.stack[--st.sp]) != 0) {
                             JUMPTO(new_ip);
                         }
                     }
                         break;
 
-                    case  2: {
+                    case low_ops2_begin: {
                         int args_num = INT;
                         int local_num = INT;
                         // fprintf(f, "BEGIN\t%d ", args_num);
@@ -851,7 +912,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  3: {
+                    case low_ops2_cbegin: {
                         int args_num = INT;
                         int local_num = INT;
                         // fprintf(f, "CBEGIN\t%d ", args_num);
@@ -860,7 +921,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  4: {
+                    case low_ops2_closure: {
                         int code_ip = INT;
                         // fprintf(f, "CLOSURE\t0x%.8x", code_ip);
                         int n = INT;
@@ -898,7 +959,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  5: {
+                    case low_ops2_callc: {
                         int arg_num = INT;
                         // fprintf(f, "CALLC\t%d", arg_num);
                         stackframe frame;
@@ -934,7 +995,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  6: {
+                    case low_ops2_call: {
                         int fn_ip = INT;
                         int arg_num = INT;
                         // fprintf(f, "CALL\t%0x%.8x ", fn_ip);
@@ -961,7 +1022,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  7: {
+                    case low_ops2_tag: {
                         char *name = STRING;
                         int arity = INT;
                         // fprintf(f, "TAG\t%s ", name);
@@ -969,14 +1030,14 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case  8: {
+                    case low_ops2_array: {
                         int size = INT;
                         // fprintf(f, "ARRAY\t%d", size);
                         check_array(&st, size);
                     }
                         break;
 
-                    case  9: {
+                    case low_ops2_fail: {
                         int x1 = INT;
                         int x2 = INT;
                        // fprintf (f, "FAIL\t%d", x1);
@@ -985,7 +1046,7 @@ void interpret (FILE *f, bytefile *bf) {
                     }
                         break;
 
-                    case 10: {
+                    case low_ops2_line: {
                         int line_num = INT;
                        // fprintf (f, "LINE\t%d", line_num);
                     }
@@ -996,11 +1057,11 @@ void interpret (FILE *f, bytefile *bf) {
                 }
                 break;
 
-            case 6:
+            case high_patterns:
                 // fprintf (f, "PATT\t%s", pats[l]);
                 pattern(&st, l);
                 break;
-            case 7: {
+            case high_builtin: {
                 int arg = -1;
                 if (l == 4) {
                     arg = INT;
