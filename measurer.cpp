@@ -1,4 +1,5 @@
 #include <iostream>
+#include <chrono>
 
 long long measure(int array_size, int stride) {
     void** buffer = new void*[array_size];
