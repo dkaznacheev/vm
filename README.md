@@ -1,6 +1,6 @@
 # Вычислитель размера кэша и уровней ассоциативности
 ## Запуск
-`g++ measurer.cpp && ./a.out`
+`g++ -O0 measurer.cpp && ./a.out`
 
 Вычислитель напечатает табличку, как в таблице 3.1 в [Robust Method to Determine Cache and TLB Characteristics](https://etd.ohiolink.edu/apexprod/rws_etd/send_file/send?accession=osu1308256764&disposition=inline)
 
