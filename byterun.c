@@ -4,6 +4,7 @@
 # include <malloc.h>
 # include "../runtime/runtime.h"
 
+
 void *__start_custom_data;
 void *__stop_custom_data;
 
@@ -175,9 +176,11 @@ typedef struct stackframe {
     local locals;
 } stackframe;
 
+#define STACK_SIZE 10000
+
 typedef struct state {
-    value stack[10000];
-    stackframe call_stack[10000];
+    value stack[STACK_SIZE];
+    stackframe call_stack[STACK_SIZE];
     value* global;
     int global_num;
     local locals;
@@ -186,14 +189,23 @@ typedef struct state {
 } state;
 
 void st_push(state* st, value v) {
+    if (st->sp >= STACK_SIZE - 1) {
+        failure ("ERROR: data stack is full\n");
+    }
     st->stack[st->sp++] = v;
 }
 
 value st_top(state* st) {
+    if (st->sp <= 0) {
+        failure ("ERROR: data stack is empty\n");
+    }
     return st->stack[st->sp - 1];
 }
 
 value st_pop(state* st) {
+    if (st->sp <= 0) {
+        failure ("ERROR: data stack is empty\n");
+    }
     return st->stack[--st->sp];
 }
 
@@ -239,6 +251,9 @@ void update_container(value container, int pos, value v) {
 }
 
 void st_push_call(state* st, stackframe frame) {
+    if (st->csp >= STACK_SIZE - 1) {
+        failure("ERROR: call stack overflow\n");
+    }
     st->call_stack[st->csp++] = frame;
 }
 
@@ -269,7 +284,9 @@ long long exec_binop(value xv, value yv, int op) {
         case 1:
             return x - y;
         case 2: {
-            // fprintf(stderr, "multiplying %d and %d", x, y);
+            #ifdef DEBUG
+                        fprintf(stderr, "multiplying %d and %d", x, y);
+#endif
             return x * y;
         }
         case 3:
@@ -299,65 +316,66 @@ long long exec_binop(value xv, value yv, int op) {
 }
 
 void print_value(FILE* f, value v) {
-    // fprintf(f, "\t\t");
+    fprintf(f, "\t\t");
     switch (v.type) {
         case type_int:
-            // fprintf(f, "INT ");
-            // fprintf(f, "%lld", *((long long*)(v.content)));
+            fprintf(f, "INT ");
+            fprintf(f, "%lld", *((long long*)(v.content)));
             break;
         case type_string:
-            // fprintf(f, "STR ");
-            // fprintf(f, "%d", *((char*)(v.content)));
+            fprintf(f, "STR ");
+            fprintf(f, "%s", (char*)(v.content));
             break;
         case type_sexp:
-            // fprintf(f, "SEXP ");
+            fprintf(f, "SEXP ");
             break;
         case type_reference:
-            // fprintf(f, "REF ");
+            fprintf(f, "REF ");
             break;
         case type_closure:
-            // fprintf(f, "CLS ");
+            fprintf(f, "CLS ");
             break;
         case type_empty:
-            // fprintf(f, "EMPTY ");
+            fprintf(f, "EMPTY ");
             break;
         case type_array:
-            // fprintf(f, "ARRAY ");
+            fprintf(f, "ARRAY ");
             break;
     }
-    // fprintf (f, "; ");
+    fprintf (f, "; ");
 }
 
 void print_locals(FILE* f, local locals) {
-    // fprintf(f, "\tlocal state:\n");
-    // fprintf(f, "\targs: %d\n", locals.arg_num);
+    fprintf(f, "\tlocal state:\n");
+    fprintf(f, "\targs: %d\n", locals.arg_num);
     for (int i = 0; i < locals.arg_num; i++) {
         print_value(f, locals.args[i]);
     }
-    // fprintf(f, "\n\tlocal: %d\n", locals.local_num);
+    fprintf(f, "\n\tlocal: %d\n", locals.local_num);
     for (int i = 0; i < locals.local_num; i++) {
         print_value(f, locals.local[i]);
     }
-    // fprintf(f, "\n\tclosure: %d\n", locals.closure_num);
+    fprintf(f, "\n\tclosure: %d\n", locals.closure_num);
     for (int i = 0; i < locals.closure_num; i++) {
         print_value(f, locals.closure[i]);
     }
 }
 
 void print_st(FILE *f, state* st) {
-    // fprintf (f, "\tstack: %d\n", st->sp);
+    fprintf (f, "\tstack: %d\n", st->sp);
     for (int i = 0; i < st->sp; i++) {
         print_value(f, st->stack[i]);
     }
-    // fprintf(f, "\n\tcall stack size: %d\n", st->csp);
-    // fprintf(f, "\tglobal:\n");
+    fprintf(f, "\n\tcall stack size: %d\n", st->csp);
+    fprintf(f, "\tglobal:\n");
     for (int i = 0; i < st->global_num; i++) {
         print_value(f, st->global[i]);
     }
-    // fprintf(f, "\n");
+    fprintf(f, "\n");
     print_locals(f, st->locals);
-    // fprintf(f, "\n");
+    fprintf(f, "\n");
 }
+
 
 void st_begin(state* st, int args_num, int local_num) {
     st->locals.local_num = local_num;
@@ -422,6 +440,8 @@ char* concat(char* buf, value* values, int size) {
     return buf;
 }
 
+char* cons_string_ptr = NULL;
+
 char* convert_to_string(value v) {
     switch (v.type) {
         case type_int: {
@@ -453,7 +473,7 @@ char* convert_to_string(value v) {
         case type_sexp: {
             sexp* sx = v.content;
 
-            if (!strcmp(sx->name, "cons")) {
+            if ((cons_string_ptr != NULL) && (sx->name == cons_string_ptr)) {
                 char* buf = malloc(4 * sizeof(char));
                 buf[0] = '{';
                 buf[1] = '\0';
@@ -474,7 +494,7 @@ char* convert_to_string(value v) {
                     }
                     if (next.type != type_sexp) break;
                     sexp* sxn = next.content;
-                    if (strcmp(sxn->name, "cons")) break;
+                    if ((cons_string_ptr != NULL) && (sxn->name != cons_string_ptr)) break;
                     strcat(buf, ", ");
                     sxv = sxn;
                 }
@@ -664,6 +684,19 @@ enum low_ops2 {
     low_ops2_line = 10,
 };
 
+char* find_cons_string(char* string_ptr, int size) {
+    char* cons = "cons";
+    int string_start = 0;
+
+    for (int i = 0; i < size; i++) {
+        if (string_ptr[i] != '\0') continue;
+        if (i - string_start == 4 && !strcmp(string_ptr + string_start, cons))
+            return string_ptr + string_start;
+        string_start = i + 1;
+    }
+    return NULL;
+}
+
 void interpret (FILE *f, bytefile *bf) {
 
 # define INT    (ip += sizeof (int), *(int*)(ip - sizeof (int)))
@@ -671,6 +704,7 @@ void interpret (FILE *f, bytefile *bf) {
 # define STRING get_string (bf, INT)
 # define FAIL   failure ("ERROR: invalid opcode %d-%d\n", h, l)
 # define JUMPTO(address) ip = bf->code_ptr + address;
+# define CHECKSTACK(n) if (st.sp < n) failure ("ERROR: not enough values on stack\n")
 
     state st;
     st.sp = 0;
@@ -681,6 +715,7 @@ void interpret (FILE *f, bytefile *bf) {
     st.locals.closure = NULL;
     st.global_num = bf->global_area_size;
     st.global = malloc(bf->global_area_size * sizeof(value));
+    cons_string_ptr = find_cons_string(bf->string_ptr, bf->stringtab_size);
     for (int i = 0; i < st.global_num; i++) {
         st.global[i] = empty_value();
     }
@@ -688,13 +723,15 @@ void interpret (FILE *f, bytefile *bf) {
     char *ops [] = {"+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "!!"};
     char *pats[] = {"=str", "#string", "#array", "#sexp", "#ref", "#val", "#fun"};
     char *lds [] = {"LD\t", "LDA\t", "ST\t"};
-    char *builtin [] = {"Lread", "Lwrite", "Lelem", "Llength", "Larray", "Lstring"};
+    char *builtin [] = {"Lread", "Lwrite", "Llength", "Lstring", "Larray", "Lelem"};
     do {
         char x = BYTE,
                 h = (x & 0xF0) >> 4,
                 l = x & 0x0F;
 
-        // fprintf (f, "0x%.8x:\t%x%x\t", ip-bf->code_ptr-1, h, l);
+        #ifdef DEBUG
+        fprintf (f, "0x%.8x:\t%x%x\t", ip-bf->code_ptr-1, h, l);
+        #endif
 
         switch (h) {
             case high_stop:
@@ -702,7 +739,10 @@ void interpret (FILE *f, bytefile *bf) {
 
                 /* BINOP */
             case high_binop: {
-                // fprintf(f, "BINOP\t%s", ops[l - 1]);
+                #ifdef DEBUG
+                fprintf(f, "BINOP\t%s", ops[l - 1]);
+                #endif
+                CHECKSTACK(2);
                 value y = st_pop(&st);
                 value x = st_pop(&st);
                 int x_not_int = x.type != type_int;
@@ -726,14 +766,18 @@ void interpret (FILE *f, bytefile *bf) {
                 switch (l) {
                     case low_ops1_const: {
                         int v = INT;
-                        // fprintf(f, "CONST\t%d", v);
+                        #ifdef DEBUG
+                        fprintf(f, "CONST\t%d", v);
+                        #endif
                         st_push(&st, int_value_of(v));
                     }
                         break;
 
                     case  low_ops1_string: {
                         char *s = STRING;
-                        // fprintf(f, "STRING\t%s", s);
+                        #ifdef DEBUG
+                        fprintf(f, "STRING\t%s", s);
+                        #endif
                         char *copy = malloc(sizeof(char) * strlen(s));
                         strcpy(copy, s);
                         st_push(&st, string_value(copy));
@@ -743,20 +787,25 @@ void interpret (FILE *f, bytefile *bf) {
                     case low_ops1_sexp: {
                         char *name = STRING;
                         int n = INT;
-                        // fprintf(f, "SEXP\t%s ", name);
-                        // fprintf(f, "%d", n);
+                        #ifdef DEBUG
+                        fprintf(f, "SEXP\t%s ", name);
+                        fprintf(f, "%d", n);
+                        #endif
                         sexp *sx = malloc(sizeof(sexp));
                         sx->name = name;
                         sx->arity = n;
                         for (int i = 0; i < n; i++) {
-                            sx->values[i] = st_pop(&st); // TODO order
+                            sx->values[n - i - 1] = st_pop(&st);
                         }
                         st_push(&st, sexp_value(sx));
                     }
                         break;
 
                     case low_ops1_sti: {
-                        // fprintf(f, "STI");
+                        #ifdef DEBUG
+                        fprintf(f, "STI");
+                        #endif
+                        CHECKSTACK(2);
                         value v = st.stack[st.sp - 1];
                         value d = st.stack[st.sp - 2];
                         designation* ds = (designation*) d.content;
@@ -767,7 +816,9 @@ void interpret (FILE *f, bytefile *bf) {
                         break;
                     case low_ops1_sta: {
                         value v = st_pop(&st);
-                        // fprintf(f, "STA");
+                        #ifdef DEBUG
+                        fprintf(f, "STA");
+                        #endif
                         value j = st_pop(&st);
                         if (j.type == type_reference) {
                             designation *d = (designation *) v.content;
@@ -784,13 +835,17 @@ void interpret (FILE *f, bytefile *bf) {
 
                     case  low_ops1_jmp: {
                         int new_ip = INT;
-                        // fprintf(f, "JMP\t0x%.8x", new_ip);
+                        #ifdef DEBUG
+                        fprintf(f, "JMP\t0x%.8x", new_ip);
+                        #endif
                         JUMPTO(new_ip);
                     }
                         break;
 
                     case low_ops1_end: {
-                        // fprintf(f, "END");
+                        #ifdef DEBUG
+                        fprintf(f, "END");
+                        #endif
                         if (st.csp == 0) {
                             goto stop;
                         }
@@ -801,9 +856,14 @@ void interpret (FILE *f, bytefile *bf) {
                         break;
 
                     case low_ops1_ret: {
-                        // fprintf(f, "RET");
+                        #ifdef DEBUG
+                        fprintf(f, "RET");
+                        #endif
                         if (st.csp == 0) {
                             goto stop;
+                        }
+                        if (st.csp <= 0) {
+                            failure("ERROR: empty call stack");
                         }
                         stackframe frame = st.call_stack[--st.csp];
                         st.locals = frame.locals;
@@ -812,27 +872,36 @@ void interpret (FILE *f, bytefile *bf) {
                         break;
 
                     case low_ops1_drop: {
-                        // fprintf(f, "DROP");
+                        #ifdef DEBUG
+                        fprintf(f, "DROP");
+                        #endif
+                        CHECKSTACK(1);
                         st.sp--;
                     }
                         break;
 
                     case low_ops1_dup: {
-                        // fprintf(f, "DUP");
-                        st.stack[st.sp] = st.stack[st.sp - 1];
-                        st.sp++;
+                        #ifdef DEBUG
+                        fprintf(f, "DUP");
+                        #endif
+                        st_push(&st, st_top(&st));
                     }
                         break;
 
                     case low_ops1_swap: {
-                        // fprintf(f, "SWAP");
+                        #ifdef DEBUG
+                        fprintf(f, "SWAP");
+                        #endif
+                        CHECKSTACK(2);
                         value t = st.stack[st.sp - 1];
                         st.stack[st.sp - 1] = st.stack[st.sp - 2];
                         st.stack[st.sp - 2] = t;
                     }
                         break;
                     case low_ops1_elem: {
-                        // fprintf(f, "ELEM");
+                        #ifdef DEBUG
+                        fprintf(f, "ELEM");
+                        #endif
                         elem(&st);
                     }
                     default:
@@ -843,23 +912,33 @@ void interpret (FILE *f, bytefile *bf) {
             case high_ld:
             case high_lda:
             case high_st: {
-                // fprintf(f, "%s\t", lds[h - 2]);
+                #ifdef DEBUG
+                fprintf(f, "%s\t", lds[h - 2]);
+                #endif
                 int dsgn_num = INT;
                 designation d;
                 d.type = l;
                 d.pos = dsgn_num;
                 switch (l) {
                     case 0:
-                        // fprintf(f, "G(%d)", dsgn_num);
+                        #ifdef DEBUG
+                        fprintf(f, "G(%d)", dsgn_num);
+                        #endif
                         break;
                     case 1:
-                        // fprintf(f, "L(%d)", dsgn_num);
+                        #ifdef DEBUG
+                        fprintf(f, "L(%d)", dsgn_num);
+                        #endif
                         break;
                     case 2:
-                        // fprintf(f, "A(%d)", dsgn_num);
+                        #ifdef DEBUG
+                        fprintf(f, "A(%d)", dsgn_num);
+                        #endif
                         break;
                     case 3:
-                        // fprintf(f, "C(%d)", dsgn_num);
+                        #ifdef DEBUG
+                        fprintf(f, "C(%d)", dsgn_num);
+                        #endif
                         break;
                     default:
                         FAIL;
@@ -887,8 +966,11 @@ void interpret (FILE *f, bytefile *bf) {
                 switch (l) {
                     case low_ops2_cjmpz: {
                         int new_ip = INT;
-                        // fprintf(f, "CJMPz\t%0x.8x", new_ip);
-                        if (to_int(st.stack[--st.sp]) == 0) { 
+                        #ifdef DEBUG
+                        fprintf(f, "CJMPz\t%0x.8x", new_ip);
+                        #endif
+
+                        if (to_int(st_pop(&st)) == 0) {
                             JUMPTO(new_ip);
                         }
                     }
@@ -896,8 +978,10 @@ void interpret (FILE *f, bytefile *bf) {
 
                     case low_ops2_cjmpnz: {
                         int new_ip = INT;
-                        // fprintf(f, "CJMPnz\t%0x.8x", new_ip);
-                        if (to_int(st.stack[--st.sp]) != 0) {
+                        #ifdef DEBUG
+                        fprintf(f, "CJMPnz\t%0x.8x", new_ip);
+                        #endif
+                        if (to_int(st_pop(&st)) != 0) {
                             JUMPTO(new_ip);
                         }
                     }
@@ -906,8 +990,10 @@ void interpret (FILE *f, bytefile *bf) {
                     case low_ops2_begin: {
                         int args_num = INT;
                         int local_num = INT;
-                        // fprintf(f, "BEGIN\t%d ", args_num);
-                        // fprintf(f, "%d", local_num);
+                        #ifdef DEBUG
+                        fprintf(f, "BEGIN\t%d ", args_num);
+                        fprintf(f, "%d", local_num);
+                        #endif
                         st_begin(&st, args_num, local_num);
                     }
                         break;
@@ -915,15 +1001,19 @@ void interpret (FILE *f, bytefile *bf) {
                     case low_ops2_cbegin: {
                         int args_num = INT;
                         int local_num = INT;
-                        // fprintf(f, "CBEGIN\t%d ", args_num);
-                        // fprintf(f, "%d", local_num);
+                        #ifdef DEBUG
+                        fprintf(f, "CBEGIN\t%d ", args_num);
+                        fprintf(f, "%d", local_num);
+                        #endif
                         st_begin(&st, args_num, local_num);
                     }
                         break;
 
                     case low_ops2_closure: {
                         int code_ip = INT;
-                        // fprintf(f, "CLOSURE\t0x%.8x", code_ip);
+                        #ifdef DEBUG
+                        fprintf(f, "CLOSURE\t0x%.8x", code_ip);
+                        #endif
                         int n = INT;
                         closure *cls = malloc(sizeof(closure));
                         cls->value_num = n;
@@ -937,22 +1027,24 @@ void interpret (FILE *f, bytefile *bf) {
                             }
                             d.pos = INT;
                             cls->values[i] = st_get_value(&st, d);
+                            #ifdef DEBUG
                             switch (d.type) {
                                 case 0:
-                                    // fprintf(f, "G(%d)", d.pos);
+                                    fprintf(f, "G(%d)", d.pos);
                                     break;
                                 case 1:
-                                    // fprintf(f, "L(%d)", d.pos);
+                                    fprintf(f, "L(%d)", d.pos);
                                     break;
                                 case 2:
-                                    // fprintf(f, "A(%d)", d.pos);
+                                    fprintf(f, "A(%d)", d.pos);
                                     break;
                                 case 3:
-                                    // fprintf(f, "C(%d)", d.pos);
+                                    fprintf(f, "C(%d)", d.pos);
                                     break;
                                 default:
                                     FAIL;
                             }
+                            #endif
                         }
                         value closure = closure_value(cls);
                         st_push(&st, closure);
@@ -961,7 +1053,9 @@ void interpret (FILE *f, bytefile *bf) {
 
                     case low_ops2_callc: {
                         int arg_num = INT;
-                        // fprintf(f, "CALLC\t%d", arg_num);
+                        #ifdef DEBUG
+                        fprintf(f, "CALLC\t%d", arg_num);
+                        #endif
                         stackframe frame;
                         frame.ret_ip = ip;
                         frame.locals = st.locals;
@@ -998,10 +1092,10 @@ void interpret (FILE *f, bytefile *bf) {
                     case low_ops2_call: {
                         int fn_ip = INT;
                         int arg_num = INT;
-                        // fprintf(f, "CALL\t%0x%.8x ", fn_ip);
-                        // fprintf(f, "%d", arg_num);
-                        // todo how to find by name and where is name?
-                        // if found:
+                        #ifdef DEBUG
+                        fprintf(f, "CALL\t%0x%.8x ", fn_ip);
+                        fprintf(f, "%d", arg_num);
+                        #endif
                         stackframe frame;
                         frame.ret_ip = ip;
                         frame.locals = st.locals;
@@ -1025,14 +1119,18 @@ void interpret (FILE *f, bytefile *bf) {
                     case low_ops2_tag: {
                         char *name = STRING;
                         int arity = INT;
-                        // fprintf(f, "TAG\t%s ", name);
-                        // fprintf(f, "%d", arity);
+                        #ifdef DEBUG
+                        fprintf(f, "TAG\t%s ", name);
+                        fprintf(f, "%d", arity);
+                        #endif
                     }
                         break;
 
                     case low_ops2_array: {
                         int size = INT;
-                        // fprintf(f, "ARRAY\t%d", size);
+                        #ifdef DEBUG
+                        fprintf(f, "ARRAY\t%d", size);
+                        #endif
                         check_array(&st, size);
                     }
                         break;
@@ -1040,15 +1138,19 @@ void interpret (FILE *f, bytefile *bf) {
                     case low_ops2_fail: {
                         int x1 = INT;
                         int x2 = INT;
-                       // fprintf (f, "FAIL\t%d", x1);
-                       // fprintf (f, "%d", x2);
+                        #ifdef DEBUG
+                        fprintf (f, "FAIL\t%d", x1);
+                        fprintf (f, "%d", x2);
+                        #endif
                         FAIL;
                     }
                         break;
 
                     case low_ops2_line: {
                         int line_num = INT;
-                       // fprintf (f, "LINE\t%d", line_num);
+                        #ifdef DEBUG
+                        fprintf (f, "LINE\t%d", line_num);
+                        #endif
                     }
                         break;
 
@@ -1058,7 +1160,9 @@ void interpret (FILE *f, bytefile *bf) {
                 break;
 
             case high_patterns:
-                // fprintf (f, "PATT\t%s", pats[l]);
+                #ifdef DEBUG
+                fprintf (f, "PATT\t%s", pats[l]);
+                #endif
                 pattern(&st, l);
                 break;
             case high_builtin: {
@@ -1066,7 +1170,9 @@ void interpret (FILE *f, bytefile *bf) {
                 if (l == 4) {
                     arg = INT;
                 }
-                // fprintf(f, "CALL %s %d\t", builtin[l], arg);
+                #ifdef DEBUG
+                fprintf(f, "CALL %s %d\t", builtin[l], arg);
+                #endif
                 run_builtin(&st, l, arg);
             }
                 break;
@@ -1074,12 +1180,16 @@ void interpret (FILE *f, bytefile *bf) {
                 FAIL;
         }
 
-        // fprintf (f, "\n");
+        #ifdef DEBUG
+        fprintf (f, "\n");
         print_st(f, &st);
+        #endif
     }
     while (1);
     stop: {
-       // fprintf(f, "<end>\n");
+       #ifdef DEBUG
+       fprintf(f, "<end>\n");
+       #endif
         0;
     }
 }
