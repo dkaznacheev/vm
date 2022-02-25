@@ -4,6 +4,7 @@
 # include <malloc.h>
 # include "../runtime/runtime.h"
 
+#define DEBUG 1
 
 void *__start_custom_data;
 void *__stop_custom_data;
@@ -270,6 +271,22 @@ value st_get_value(state* st, designation d) {
     }
 }
 
+enum binop_types {
+    binop_add = 0,
+    binop_sub = 1,
+    binop_mul = 2,
+    binop_div = 3,
+    binop_rem = 4,
+    binop_lt = 5,
+    binop_le = 6,
+    binop_gt = 7,
+    binop_ge = 8,
+    binop_eq = 9,
+    binop_ne = 10,
+    binop_and = 11,
+    binop_or = 12
+};
+
 long long exec_binop(value xv, value yv, int op) {
     if (op == 9) {
         if (xv.type != type_int || yv.type != type_int) {
@@ -279,35 +296,32 @@ long long exec_binop(value xv, value yv, int op) {
     int x = *((long long*)(xv.content));
     int y = *((long long*)(yv.content));
     switch (op) {
-        case 0:
+        case binop_add:
             return x + y;
-        case 1:
+        case binop_sub:
             return x - y;
-        case 2: {
-            #ifdef DEBUG
-                        fprintf(stderr, "multiplying %d and %d", x, y);
-#endif
+        case binop_mul: {
             return x * y;
         }
-        case 3:
+        case binop_div:
             return x / y;
-        case 4:
+        case binop_rem:
             return x % y;
-        case 5:
+        case binop_lt:
             return x < y;
-        case 6:
+        case binop_le:
             return x <= y;
-        case 7:
+        case binop_gt:
             return x > y;
-        case 8:
+        case binop_ge:
             return x >= y;
-        case 9:
+        case binop_eq:
             return x == y;
-        case 10:
+        case binop_ne:
             return x != y;
-        case 11:
+        case binop_and:
             return x && y;
-        case 12:
+        case binop_or:
             return x || y;
         default:
             return -1;
